@@ -1,0 +1,36 @@
+discord:
+  token: "your_discord_bot_token_here"
+
+uptime_kuma:
+  base_url: "https://uptime.example.com"
+  api_key: "your_uptime_kuma_api_key_here"
+
+update_interval: "60s"  # How often to update the status (e.g., "30s", "1m", "5m")
+
+sections:
+  - name: "Web Services"
+    services:
+      - name: "main_website"
+        display_name: "Main Website"
+      - name: "api_gateway"
+        display_name: "API Gateway"
+      - name: "documentation"
+        display_name: "Documentation"
+  
+  - name: "Infrastructure"
+    services:
+      - name: "database_primary"
+        display_name: "Primary Database"
+      - name: "redis_cache"
+        display_name: "Redis Cache"
+      - name: "load_balancer"
+        display_name: "Load Balancer"
+  
+  - name: "Monitoring"
+    services:
+      - name: "prometheus"
+        display_name: "Prometheus"
+      - name: "grafana"
+        display_name: "Grafana"
+      - name: "alertmanager"
+        display_name: "AlertManager" 
