@@ -146,43 +146,24 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 	statusMessageMutex.Lock()
 	defer statusMessageMutex.Unlock()
 
-	if statusMessageID == 0 {
-		// Create new message
-		msg, err := e.Client().Rest().CreateMessage(e.Channel().ID(), discord.NewMessageCreateBuilder().
-			SetEmbeds(*embed).
-			Build(),
-		)
-		if err != nil {
-			log.Printf("Failed to create status message: %v", err)
-			e.CreateMessage(discord.NewMessageCreateBuilder().
-				SetContent("Failed to create status message.").
-				Build(),
-			)
-			return
-		}
-		statusMessageID = msg.ID
-		statusChannelID = e.Channel().ID()
-	} else {
-		// Update existing message
-		_, err := e.Client().Rest().UpdateMessage(e.Channel().ID(), statusMessageID, discord.NewMessageUpdateBuilder().
-			SetEmbeds(*embed).
-			Build(),
-		)
-		if err != nil {
-			log.Printf("Failed to update status message: %v", err)
-			e.CreateMessage(discord.NewMessageCreateBuilder().
-				SetContent("Failed to update status message.").
-				Build(),
-			)
-			return
-		}
-	}
-
-	e.CreateMessage(discord.NewMessageCreateBuilder().
-		SetContent("Status message has been updated.").
-		SetEphemeral(true).
+	// Respond to the slash command with the embed
+	err = e.CreateMessage(discord.NewMessageCreateBuilder().
+		SetEmbeds(*embed).
 		Build(),
 	)
+	if err != nil {
+		log.Printf("Failed to respond to interaction: %v", err)
+		return
+	}
+
+	// Fetch the original interaction response to get the message ID and channel ID
+	msg, err := e.Client().Rest().GetInteractionResponse(e.ApplicationID(), e.Token())
+	if err != nil {
+		log.Printf("Failed to fetch original interaction response: %v", err)
+		return
+	}
+	statusMessageID = msg.ID
+	statusChannelID = msg.ChannelID
 }
 
 func (b *Bot) updateStatusLoop() {
