@@ -105,6 +105,7 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 		log.Printf("Failed to parse guild ID: %v", err)
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Failed to verify permissions.").
+			SetEphemeral(true).
 			Build(),
 		)
 		return
@@ -115,6 +116,7 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 		log.Printf("Failed to get guild: %v", err)
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Failed to verify permissions.").
+			SetEphemeral(true).
 			Build(),
 		)
 		return
@@ -123,6 +125,7 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 	if e.User().ID != guild.OwnerID {
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Only the server owner can use this command.").
+			SetEphemeral(true).
 			Build(),
 		)
 		return
@@ -138,6 +141,7 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 	if embed == nil {
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Failed to fetch service statuses.").
+			SetEphemeral(true).
 			Build(),
 		)
 		return
@@ -146,7 +150,33 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 	statusMessageMutex.Lock()
 	defer statusMessageMutex.Unlock()
 
-	// Respond to the slash command with the embed
+	// Check if we already have a status message being monitored
+	if statusMessageID != 0 && statusChannelID != 0 {
+		// Update the existing message
+		_, err := e.Client().Rest().UpdateMessage(statusChannelID, statusMessageID, discord.NewMessageUpdateBuilder().
+			SetEmbeds(*embed).
+			Build(),
+		)
+		if err != nil {
+			log.Printf("Failed to update status message: %v", err)
+			e.CreateMessage(discord.NewMessageCreateBuilder().
+				SetContent("Failed to update status message.").
+				SetEphemeral(true).
+				Build(),
+			)
+			return
+		}
+
+		// Send ephemeral message to confirm update
+		e.CreateMessage(discord.NewMessageCreateBuilder().
+			SetContent("Status message has been updated.").
+			SetEphemeral(true).
+			Build(),
+		)
+		return
+	}
+
+	// If no existing message, create a new one
 	err = e.CreateMessage(discord.NewMessageCreateBuilder().
 		SetEmbeds(*embed).
 		Build(),
