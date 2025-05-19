@@ -55,4 +55,4 @@ func (c *Client) GetMetrics() (map[string]ServiceStatus, error) {
 	}
 
 	return parseMetrics(string(body))
-} 
+}

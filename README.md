@@ -7,7 +7,8 @@ A Discord bot that displays Uptime Kuma service statuses in a Discord channel.
 - Real-time service status monitoring from Uptime Kuma's API
 - Minimal and detailed view options
 - Automatic status updates
-- Restricted to server owners and administrators
+- Restricted to server owners
+- Persistent storage of status message info using SQLite
 
 ## Building
 
@@ -38,39 +39,20 @@ The binary will be created in the project directory, while packages and archives
 ## Setup
 
 1. Create a Discord bot and get its token
-2. Create a `config.yaml` file with your settings:
-
-```yaml
-discord:
-  token: "your-discord-bot-token"
-
-uptime_kuma:
-  base_url: "https://your-uptime-kuma-instance"
-  api_key: "your-uptime-kuma-api-key"
-
-update_interval: "60s"  # Update interval (default: 60s)
-
-sections:
-  - name: "Production"
-    services:
-      - name: "api"
-        display_name: "API Server"  # Optional display name
-      - name: "cache"
-        display_name: "Cache Server"
-  - name: "Development"
-    services:
-      - name: "dev-api"
-        display_name: "Dev API"
-```
-
+2. Look at [config.yaml.example](config.yaml.example) for configuration details and create a `config.yaml` file with your settings.
 3. Run the bot:
 ```bash
 ./kuma-disgo
 ```
 
+You can specify a custom config file path using the `-c` or `--config` flag:
+```bash
+./kuma-disgo -c /path/to/your/config.yaml
+```
+
 ## Commands
 
-- `/status [view:minimal|detailed]` - Show service statuses (restricted to server owners and administrators)
+- `/status [view:minimal|detailed]` - Show service statuses (restricted to server owners)
 
 ## Status Indicators
 
@@ -79,6 +61,14 @@ sections:
 - 🟡 Pending
 - 🔵 Maintenance
 - ⚪ Unknown
+
+## Storage
+
+The bot uses SQLite to store status message info, allowing for persistent storage across restarts. The database file (`status.db`) is created in the same directory as the `config.yaml` file.
+
+## Demo
+
+![Demo](screenshots/demo.gif)
 
 ## License
 
