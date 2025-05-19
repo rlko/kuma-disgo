@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/disgoorg/disgo"
@@ -15,6 +15,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/rlko/kuma-disgo/src/config"
+	"github.com/rlko/kuma-disgo/src/db"
 	"github.com/rlko/kuma-disgo/src/kuma"
 )
 
@@ -42,20 +43,16 @@ var (
 			},
 		},
 	}
-
-	statusMessageID    snowflake.ID
-	statusChannelID    snowflake.ID
-	statusMessageMutex sync.Mutex
-	statusViewType     string = "minimal"
 )
 
 type Bot struct {
-	client     bot.Client
-	kumaClient *kuma.Client
-	cfg        *config.Config
+	client      bot.Client
+	kumaClient  *kuma.Client
+	cfg         *config.Config
+	statusStore *db.StatusStore
 }
 
-func NewBot(token string, kumaClient *kuma.Client, cfg *config.Config) (*Bot, error) {
+func NewBot(token string, kumaClient *kuma.Client, cfg *config.Config, statusStore *db.StatusStore) (*Bot, error) {
 	client, err := disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(
@@ -66,7 +63,7 @@ func NewBot(token string, kumaClient *kuma.Client, cfg *config.Config) (*Bot, er
 		bot.WithEventListeners(&events.ListenerAdapter{
 			OnApplicationCommandInteraction: func(e *events.ApplicationCommandInteractionCreate) {
 				if e.Data.CommandName() == "status" {
-					handleStatusCommand(e, kumaClient, cfg)
+					handleStatusCommand(e, kumaClient, cfg, statusStore)
 				}
 			},
 		}),
@@ -76,9 +73,10 @@ func NewBot(token string, kumaClient *kuma.Client, cfg *config.Config) (*Bot, er
 	}
 
 	return &Bot{
-		client:     client,
-		kumaClient: kumaClient,
-		cfg:        cfg,
+		client:      client,
+		kumaClient:  kumaClient,
+		cfg:         cfg,
+		statusStore: statusStore,
 	}, nil
 }
 
@@ -98,7 +96,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	return nil
 }
 
-func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClient *kuma.Client, cfg *config.Config) {
+func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClient *kuma.Client, cfg *config.Config, statusStore *db.StatusStore) {
 	// Check if user is server owner
 	guildID, err := snowflake.Parse(e.GuildID().String())
 	if err != nil {
@@ -122,6 +120,14 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 		return
 	}
 
+	// Debug print: Log server owner name, server name, and channel name
+	owner, err := e.Client().Rest().GetUser(guild.OwnerID)
+	if err != nil {
+		log.Printf("Failed to get owner info: %v", err)
+	} else {
+		log.Printf("Status command triggered by server owner: %s in server: %s, channel: %s", owner.Username, guild.Name, e.Channel().Name())
+	}
+
 	if e.User().ID != guild.OwnerID {
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Only the server owner can use this command.").
@@ -132,12 +138,13 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 	}
 
 	// Get view type from command options
+	viewType := "minimal"
 	if viewOpt, ok := e.SlashCommandInteractionData().OptString("view"); ok {
-		statusViewType = viewOpt
+		viewType = viewOpt
 	}
 
 	// Create or update status message
-	embed := createStatusEmbed(kumaClient, cfg)
+	embed := createStatusEmbed(kumaClient, cfg, viewType)
 	if embed == nil {
 		e.CreateMessage(discord.NewMessageCreateBuilder().
 			SetContent("Failed to fetch service statuses.").
@@ -147,36 +154,57 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 		return
 	}
 
-	statusMessageMutex.Lock()
-	defer statusMessageMutex.Unlock()
+	// Locking handled by StatusStore
+	entries, err := statusStore.GetStatus()
+	if err != nil {
+		log.Printf("Failed to get status from store: %v", err)
+	}
 
-	// Check if we already have a status message being monitored
-	if statusMessageID != 0 && statusChannelID != 0 {
-		// Update the existing message
-		_, err := e.Client().Rest().UpdateMessage(statusChannelID, statusMessageID, discord.NewMessageUpdateBuilder().
-			SetEmbeds(*embed).
-			Build(),
-		)
+	// Check if there's an existing entry for this channel
+	var messageID, channelID string
+	for _, entry := range entries {
+		if entry.ChannelID == e.Channel().ID().String() {
+			messageID = entry.MessageID
+			channelID = entry.ChannelID
+			break
+		}
+	}
+
+	if messageID != "" && channelID != "" {
+		// Check if the embed post still exists
+		_, err := e.Client().Rest().GetMessage(snowflake.MustParse(channelID), snowflake.MustParse(messageID))
 		if err != nil {
-			log.Printf("Failed to update status message: %v", err)
+			log.Printf("Embed post no longer exists for channel %s: %v", channelID, err)
+			// Delete the entry from the DB
+			if err := statusStore.DeleteStatus(messageID, channelID); err != nil {
+				log.Printf("Failed to delete status entry for channel %s: %v", channelID, err)
+			}
+		} else {
+			// Update the existing message
+			_, err := e.Client().Rest().UpdateMessage(snowflake.MustParse(channelID), snowflake.MustParse(messageID), discord.NewMessageUpdateBuilder().
+				SetEmbeds(*embed).
+				Build(),
+			)
+			if err != nil {
+				log.Printf("Failed to update status message: %v", err)
+				e.CreateMessage(discord.NewMessageCreateBuilder().
+					SetContent("Failed to update status message.").
+					SetEphemeral(true).
+					Build(),
+				)
+				return
+			}
+			statusStore.SetStatus(messageID, channelID, viewType)
 			e.CreateMessage(discord.NewMessageCreateBuilder().
-				SetContent("Failed to update status message.").
+				SetContent("Status message has been updated.").
 				SetEphemeral(true).
 				Build(),
 			)
 			return
 		}
-
-		// Send ephemeral message to confirm update
-		e.CreateMessage(discord.NewMessageCreateBuilder().
-			SetContent("Status message has been updated.").
-			SetEphemeral(true).
-			Build(),
-		)
-		return
 	}
 
-	// If no existing message, create a new one
+	// If no existing message or it was deleted, create a new one
 	err = e.CreateMessage(discord.NewMessageCreateBuilder().
 		SetEmbeds(*embed).
 		Build(),
@@ -192,39 +220,44 @@ func handleStatusCommand(e *events.ApplicationCommandInteractionCreate, kumaClie
 		log.Printf("Failed to fetch original interaction response: %v", err)
 		return
 	}
-	statusMessageID = msg.ID
-	statusChannelID = msg.ChannelID
+	statusStore.SetStatus(msg.ID.String(), msg.ChannelID.String(), viewType)
 }
 
 func (b *Bot) updateStatusLoop() {
 	ticker := time.NewTicker(b.cfg.UpdateInterval)
 	defer ticker.Stop()
 
+	log.Printf("Starting status update loop with interval: %v", b.cfg.UpdateInterval)
+
 	for range ticker.C {
-		statusMessageMutex.Lock()
-		if statusMessageID == 0 || statusChannelID == 0 {
-			statusMessageMutex.Unlock()
-			continue
-		}
-
-		embed := createStatusEmbed(b.kumaClient, b.cfg)
-		if embed == nil {
-			statusMessageMutex.Unlock()
-			continue
-		}
-
-		_, err := b.client.Rest().UpdateMessage(statusChannelID, statusMessageID, discord.NewMessageUpdateBuilder().
-			SetEmbeds(*embed).
-			Build(),
-		)
+		entries, err := b.statusStore.GetStatus()
 		if err != nil {
-			log.Printf("Failed to update status message: %v", err)
+			log.Printf("Failed to get status entries: %v", err)
+			continue
 		}
-		statusMessageMutex.Unlock()
+		for _, entry := range entries {
+			embed := createStatusEmbed(b.kumaClient, b.cfg, entry.ViewType)
+			if embed == nil {
+				continue
+			}
+			_, err = b.client.Rest().UpdateMessage(snowflake.MustParse(entry.ChannelID), snowflake.MustParse(entry.MessageID), discord.NewMessageUpdateBuilder().
+				SetEmbeds(*embed).
+				Build(),
+			)
+			if err != nil {
+				log.Printf("Failed to update status message for channel %s: %v", entry.ChannelID, err)
+				// If the embed post doesn't exist anymore, delete the entry from the DB
+				if strings.Contains(err.Error(), "Unknown Message") {
+					if err := b.statusStore.DeleteStatus(entry.MessageID, entry.ChannelID); err != nil {
+						log.Printf("Failed to delete status entry for channel %s: %v", entry.ChannelID, err)
+					}
+				}
+			}
+		}
 	}
 }
 
-func createStatusEmbed(kumaClient *kuma.Client, cfg *config.Config) *discord.Embed {
+func createStatusEmbed(kumaClient *kuma.Client, cfg *config.Config, statusViewType string) *discord.Embed {
 	metrics, err := kumaClient.GetMetrics()
 	if err != nil {
 		log.Printf("Failed to get metrics: %v", err)

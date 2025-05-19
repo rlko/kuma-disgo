@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/disgoorg/disgo v0.16.11
 	github.com/disgoorg/snowflake/v2 v2.0.1
+	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/spf13/cobra v1.9.1
 	gopkg.in/yaml.v3 v3.0.1
 )

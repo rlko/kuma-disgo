@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rlko/kuma-disgo/src/config"
+	"github.com/rlko/kuma-disgo/src/db"
 	"github.com/rlko/kuma-disgo/src/discord"
 	"github.com/rlko/kuma-disgo/src/kuma"
 )
@@ -75,7 +76,14 @@ func run(cmd *cobra.Command, args []string) error {
 
 	kumaClient := kuma.NewClient(cfg.UptimeKuma.BaseURL, cfg.UptimeKuma.APIKey)
 
-	bot, err := discord.NewBot(cfg.Discord.Token, kumaClient, cfg)
+	// Initialize StatusStore
+	statusDBPath := filepath.Join(filepath.Dir(cfgPath), "status.db")
+	statusStore, err := db.NewStatusStore(statusDBPath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize status store: %w", err)
+	}
+
+	bot, err := discord.NewBot(cfg.Discord.Token, kumaClient, cfg, statusStore)
 	if err != nil {
 		return fmt.Errorf("failed to create bot: %w", err)
 	}
