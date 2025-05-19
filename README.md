@@ -19,13 +19,13 @@ The project uses a Makefile for building and packaging:
 make build
 
 # Build with compression (requires UPX)
-make build COMPRESS=1
+make compress
 
-# Create a Debian package
-make deb
+# Create a Debian package with compression
+make deb COMPRESS=1
 
-# Create a tarball
-make tarball
+# Create a tarball with compression
+make tarball COMPRESS=1
 
 # Install system-wide
 make install
